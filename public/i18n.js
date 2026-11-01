@@ -763,6 +763,10 @@ const EN_EXACT = {
   ,"鸦羽岭": "Raven Ridge"
   ,"灰烬港": "Ash Harbor"
   ,"禾": "T"
+  ,"小满": "Xiaoman"
+  ,"罗盘": "Compass"
+  ,"纸鸢": "Kite"
+  ,"七号": "No. 7"
 };
 
 const REGEX_TRANSLATIONS = [

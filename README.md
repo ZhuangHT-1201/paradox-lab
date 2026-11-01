@@ -12,6 +12,7 @@ Paradox Lab turns cooperation, bargaining, public goods, auctions, hidden factio
 
 - **Nine distinct games** with separate rules, payoff structures, and AI strategies.
 - **Single-click language switch** between Chinese and English. The current match and round are preserved.
+- **Per-agent API profiles**: assign independent keys, models, and endpoints to each opponent, teammate, or crowd member.
 - **DeepSeek integration** through a local server proxy. API keys never enter the frontend bundle.
 - **Local strategy fallback** for every game when no API key is configured.
 - **Real-time multiplayer-style systems**: hidden factions, simultaneous moves, forced coalition matching, and multi-front resource allocation.
@@ -20,6 +21,10 @@ Paradox Lab turns cooperation, bargaining, public goods, auctions, hidden factio
 - **Responsive, dependency-free frontend** with no build step.
 
 ## Screenshots
+
+| Per-agent API profiles | Agent API assignments |
+| --- | --- |
+| ![Agent API configuration](docs/screenshots/agent-api-en.png) | ![Per-agent API roster](docs/screenshots/agent-roster-en.png) |
 
 | Arena | Hidden-faction vote |
 | --- | --- |
@@ -80,11 +85,17 @@ Restart the server after changing `.env`.
 
 You can also enter a temporary key from **AI Settings** in the app. Temporary keys are stored in the current tab's `sessionStorage`, sent only to the local proxy, and never written into the repository.
 
+### Per-agent intelligence
+
+Open **AI Settings** to create up to six API profiles. Each profile can use a different provider-compatible endpoint, model, and temporary key. In a match, the **Agent APIs** panel assigns a profile to every AI participant independently. This allows mixed matches, such as one local opponent, one DeepSeek chat model, and another reasoner endpoint in the same game.
+
+Profiles without a key use the server key from `.env` when available. Otherwise, that participant falls back to its local strategy without stopping the match.
+
 Local opponents are always available and require no network connection. The game automatically falls back to them when the model is unavailable, invalid, or times out.
 
 ## Privacy
 
-Profiles and match archives stay in browser localStorage. In DeepSeek mode, the active game state and recent relevant history are sent to the configured model endpoint to produce an opponent decision. Full match archives are not uploaded.
+Profiles and match archives stay in browser localStorage. During remote model play, each agent's active game state and recent relevant history are sent to the endpoint assigned to that agent. Full match archives are not uploaded.
 
 ## Project Structure
 

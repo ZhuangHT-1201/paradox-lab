@@ -527,18 +527,42 @@ const DEFAULT_STORE = {
   version: 1,
   profile: { name: "策略家", avatar: "策" },
   history: [],
-  settings: { model: "deepseek-chat", baseUrl: "https://api.deepseek.com" }
+  settings: {
+    model: "deepseek-chat",
+    baseUrl: "https://api.deepseek.com",
+    bindings: {},
+    profiles: [
+      {
+        id: "default",
+        name: "DeepSeek",
+        model: "deepseek-chat",
+        baseUrl: "https://api.deepseek.com"
+      }
+    ]
+  }
 };
 
 function readStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem("paradox-lab-store") || "null");
     if (!parsed || typeof parsed !== "object") return structuredClone(DEFAULT_STORE);
+    const parsedSettings = { ...DEFAULT_STORE.settings, ...(parsed.settings || {}) };
+    const profiles =
+      Array.isArray(parsedSettings.profiles) && parsedSettings.profiles.length
+        ? parsedSettings.profiles
+        : [
+            {
+              id: "default",
+              name: "DeepSeek",
+              model: parsedSettings.model || "deepseek-chat",
+              baseUrl: parsedSettings.baseUrl || "https://api.deepseek.com"
+            }
+          ];
     return {
       ...structuredClone(DEFAULT_STORE),
       ...parsed,
       profile: { ...DEFAULT_STORE.profile, ...(parsed.profile || {}) },
-      settings: { ...DEFAULT_STORE.settings, ...(parsed.settings || {}) },
+      settings: { ...parsedSettings, profiles },
       history: Array.isArray(parsed.history) ? parsed.history : []
     };
   } catch {
@@ -551,6 +575,7 @@ let currentGame = null;
 let activeFilter = "all";
 let appLanguage = getLanguage();
 let preserveFinishedGame = false;
+let apiProfileDrafts = null;
 let serverStatus = {
   serverConfigured: false,
   model: "deepseek-chat",
@@ -564,18 +589,53 @@ function saveStore() {
   updateChrome();
 }
 
-function sessionKey() {
-  return sessionStorage.getItem("paradox-deepseek-key") || "";
+function readProfileKeys() {
+  try {
+    return JSON.parse(sessionStorage.getItem("paradox-profile-keys") || "{}");
+  } catch {
+    return {};
+  }
 }
 
-function saveSessionKey(key) {
-  if (key) sessionStorage.setItem("paradox-deepseek-key", key);
-  else sessionStorage.removeItem("paradox-deepseek-key");
+function sessionKey(profileId = "default") {
+  const keys = readProfileKeys();
+  return keys[profileId] || (profileId === "default" ? sessionStorage.getItem("paradox-deepseek-key") || "" : "");
+}
+
+function saveSessionKey(key, profileId = "default") {
+  const keys = readProfileKeys();
+  if (key) keys[profileId] = key;
+  else delete keys[profileId];
+  sessionStorage.setItem("paradox-profile-keys", JSON.stringify(keys));
+  if (profileId === "default") {
+    if (key) sessionStorage.setItem("paradox-deepseek-key", key);
+    else sessionStorage.removeItem("paradox-deepseek-key");
+  }
   updateChrome();
 }
 
 function aiAvailable() {
-  return Boolean(serverStatus.serverConfigured || sessionKey());
+  return Boolean(
+    serverStatus.serverConfigured ||
+      sessionKey() ||
+      Object.keys(readProfileKeys()).length
+  );
+}
+
+function getApiProfile(profileId = "default") {
+  return (
+    store.settings.profiles.find((profile) => profile.id === profileId) ||
+    store.settings.profiles[0] ||
+    DEFAULT_STORE.settings.profiles[0]
+  );
+}
+
+function boundProfile(gameId, actorId) {
+  return store.settings.bindings?.[gameId]?.[actorId] || "default";
+}
+
+function profileAvailable(profile) {
+  return Boolean(serverStatus.serverConfigured || sessionKey(profile.id));
 }
 
 function totalWins() {
@@ -1001,12 +1061,24 @@ function createGame(gameId) {
   const game = baseGame(gameId);
   if (gameId === "prisoner") {
     game.opponent = structuredClone(pick(PRISONER_PERSONAS));
+    game.opponent.id = "opponent";
+    game.opponent.profileId = boundProfile(gameId, "opponent");
   } else if (gameId === "ultimatum") {
     game.opponent = structuredClone(pick(NEGOTIATOR_PERSONAS));
+    game.opponent.id = "opponent";
+    game.opponent.profileId = boundProfile(gameId, "opponent");
   } else if (gameId === "commons") {
     game.opponents = shuffled(COMMONS_PERSONAS)
       .slice(0, 2)
-      .map((persona) => ({ ...structuredClone(persona), score: 0 }));
+      .map((persona) => {
+        const actorId = `steward-${persona.type}`;
+        return {
+          ...structuredClone(persona),
+          id: actorId,
+          score: 0,
+          profileId: boundProfile(gameId, actorId)
+        };
+      });
     game.opponent = {
       name: game.opponents.map((item) => item.name).join(" · "),
       glyph: "泉",
@@ -1017,6 +1089,8 @@ function createGame(gameId) {
     game.roundData = { contribution: 10 };
   } else if (gameId === "auction") {
     game.opponent = structuredClone(pick(AUCTION_PERSONAS));
+    game.opponent.id = "opponent";
+    game.opponent.profileId = boundProfile(gameId, "opponent");
     game.values = Array.from({ length: game.totalRounds }, () => randomBetween(72, 126));
     game.aiValues = Array.from({ length: game.totalRounds }, () => randomBetween(68, 130));
     game.bid = Math.round(game.values[0] * 0.72);
@@ -1033,7 +1107,9 @@ function createGame(gameId) {
       ...persona,
       index,
       score: 0,
-      lastChoice: index % 2 ? "blue" : "red"
+      lastChoice: index % 2 ? "blue" : "red",
+      id: `crowd-${index}`,
+      profileId: boundProfile(gameId, `crowd-${index}`)
     }));
   } else if (gameId === "council") {
     game.playerFaction = Math.random() < 0.5 ? "court" : "rebel";
@@ -1041,7 +1117,11 @@ function createGame(gameId) {
       court: { name: "曜庭", glyph: "曜", score: 0 },
       rebel: { name: "灰盟", glyph: "灰", score: 0 }
     };
-    game.agents = COUNCIL_AGENTS.map((agent) => ({ ...structuredClone(agent) }));
+    game.agents = COUNCIL_AGENTS.map((agent, index) => ({
+      ...structuredClone(agent),
+      id: `council-${index}`,
+      profileId: boundProfile(gameId, `council-${index}`)
+    }));
     const favorPlan = shuffled(["court", "court", "rebel", "rebel", "court"]);
     const bills = {
       court: [
@@ -1070,7 +1150,8 @@ function createGame(gameId) {
     game.agents = WASTELAND_AGENTS.map((agent, index) => ({
       ...structuredClone(agent),
       id: `agent${index}`,
-      energy: 12
+      energy: 12,
+      profileId: boundProfile(gameId, `agent${index}`)
     }));
     game.playerEnergy = 12;
     game.opponent = {
@@ -1086,7 +1167,8 @@ function createGame(gameId) {
       ...structuredClone(agent),
       id: `agent${index}`,
       score: 0,
-      lastPartner: index === 0 ? "player" : `agent${Math.max(0, index - 1)}`
+      lastPartner: index === 0 ? "player" : `agent${Math.max(0, index - 1)}`,
+      profileId: boundProfile(gameId, `agent${index}`)
     }));
     game.opponent = {
       name: "三名棋手",
@@ -1100,7 +1182,8 @@ function createGame(gameId) {
     game.agents = BLITZ_AGENTS.map((agent, index) => ({
       ...structuredClone(agent),
       id: `agent${index}`,
-      score: 0
+      score: 0,
+      profileId: boundProfile(gameId, `agent${index}`)
     }));
     game.budgets = [9, 11, 13];
     game.roundData = { allocation: balancedAllocation(game.budgets[0]) };
@@ -1124,7 +1207,7 @@ function balancedAllocation(budget) {
   return allocation;
 }
 
-async function callAI(system, prompt) {
+async function callAI(system, prompt, profile = getApiProfile()) {
   pendingAIRequests += 1;
   updateChrome();
   try {
@@ -1138,9 +1221,9 @@ async function callAI(system, prompt) {
       body: JSON.stringify({
         system: `${system}${languageInstruction}`,
         prompt,
-        apiKey: sessionKey() || undefined,
-        model: store.settings.model || serverStatus.model || "deepseek-chat",
-        baseUrl: store.settings.baseUrl || serverStatus.endpoint
+        apiKey: sessionKey(profile.id) || undefined,
+        model: profile.model || serverStatus.model || "deepseek-chat",
+        baseUrl: profile.baseUrl || serverStatus.endpoint
       })
     });
     const data = await response.json().catch(() => ({}));
@@ -1154,10 +1237,11 @@ async function callAI(system, prompt) {
   }
 }
 
-async function tryAI(game, system, prompt) {
-  if (!aiAvailable()) return null;
+async function tryAI(game, system, prompt, actor = null) {
+  const profile = getApiProfile(actor?.profileId || "default");
+  if (!profileAvailable(profile)) return null;
   try {
-    const result = await callAI(system, prompt);
+    const result = await callAI(system, prompt, profile);
     if (!result || typeof result !== "object") throw new Error("模型没有返回可用的结构化结果");
     game.usedDeepSeek = true;
     return result;
@@ -1364,6 +1448,7 @@ function renderGame(gameId) {
         <aside class="game-side-column">
           <div id="opponent-dynamic"></div>
           <div id="score-dynamic"></div>
+          <div id="intel-dynamic"></div>
           <details class="rules-card">
             <summary>博弈规则与收益</summary>
             <div class="rules-copy">
@@ -1404,10 +1489,13 @@ function updateGameRoom() {
   if (opponentNode) opponentNode.innerHTML = opponentCardMarkup(game);
   const scoreNode = $("#score-dynamic");
   if (scoreNode) scoreNode.innerHTML = sideScoreMarkup(game);
+  const intelNode = $("#intel-dynamic");
+  if (intelNode) intelNode.innerHTML = intelligenceRosterMarkup(game);
 
   hydrateIcons(stageNode || document);
   hydrateIcons(opponentNode || document);
   hydrateIcons(scoreNode || document);
+  hydrateIcons(intelNode || document);
 }
 
 function stageFrame(game, content, brief) {
@@ -1648,6 +1736,71 @@ function opponentCardMarkup(game) {
         ${(opponent.traits || []).map((trait) => `<span class="trait">${escapeHTML(trait)}</span>`).join("")}
       </div>
     </article>`;
+}
+
+function intelligenceActors(game) {
+  if (["prisoner", "ultimatum", "auction"].includes(game.gameId)) {
+    return [game.opponent];
+  }
+  if (game.gameId === "commons") return game.opponents || [];
+  if (game.gameId === "minority") return game.crowd || [];
+  return game.agents || [];
+}
+
+function intelligenceRosterMarkup(game) {
+  const en = appLanguage === "en";
+  const actors = intelligenceActors(game);
+  if (!actors.length) return "";
+  return `
+    <article class="info-card agent-roster">
+      <div class="info-card-head">
+        <h3>${en ? "Agent APIs" : "智能体接口"}</h3>
+        <button class="text-link" data-action="open-settings" type="button">${icon("settings")} ${en ? "Manage" : "配置"}</button>
+      </div>
+      <div class="agent-api-list">
+        ${actors
+          .map((actor, index) => {
+            const actorId = actor.id || (game.gameId === "commons" ? `steward${index}` : `actor${index}`);
+            const profileId = actor.profileId || "default";
+            const profile = getApiProfile(profileId);
+            const online = profileAvailable(profile);
+            return `
+              <div class="agent-api-row">
+                <span class="agent-api-avatar ${online ? "online" : ""}">${actor.glyph || actor.name?.slice(0, 1) || "A"}</span>
+                <div class="agent-api-main">
+                  <strong>${escapeHTML(actor.name)}</strong>
+                  <small>${escapeHTML(actor.role || (en ? "Agent" : "智能体"))}</small>
+                </div>
+                <select data-agent-profile data-actor-id="${escapeHTML(actorId)}" aria-label="${en ? "API profile" : "接口配置"}">
+                  ${store.settings.profiles
+                    .map(
+                      (item) =>
+                        `<option value="${escapeHTML(item.id)}" ${item.id === profileId ? "selected" : ""}>${escapeHTML(item.name)}</option>`
+                    )
+                    .join("")}
+                </select>
+                <span class="agent-api-state ${online ? "online" : ""}">${online ? "API" : "LOCAL"}</span>
+              </div>`;
+          })
+          .join("")}
+      </div>
+    </article>`;
+}
+
+function setActorProfile(actorId, profileId) {
+  const game = currentGame;
+  if (!game) return;
+  const actor = intelligenceActors(game).find(
+    (item, index) =>
+      (item.id || (game.gameId === "commons" ? `steward${index}` : `actor${index}`)) === actorId
+  );
+  if (!actor) return;
+  actor.profileId = profileId;
+  store.settings.bindings = store.settings.bindings || {};
+  store.settings.bindings[game.gameId] = store.settings.bindings[game.gameId] || {};
+  store.settings.bindings[game.gameId][actorId] = profileId;
+  saveStore();
+  updateGameRoom();
 }
 
 function sideScoreMarkup(game) {
@@ -1928,7 +2081,8 @@ async function choosePrisonerAI(game) {
 你的角色定位：${game.opponent.role}。
 历史记录（JSON）：${JSON.stringify(game.history.slice(-6).map((item) => ({ round: item.round, player: item.playerAction, you: item.aiAction })))}
 请选择本轮动作：cooperate（合作）或 defect（背叛）。不要机械随机，要结合角色性格、对玩家模式与长期收益的判断。
-只输出：{"action":"cooperate 或 defect","quote":"不超过42字、符合角色口吻的发言"}`
+只输出：{"action":"cooperate 或 defect","quote":"不超过42字、符合角色口吻的发言"}`,
+    game.opponent
   );
   if (model && ["cooperate", "defect"].includes(model.action)) {
     return {
@@ -2144,7 +2298,8 @@ async function respondToPlayerOffer(offer) {
     `第 ${game.round}/${game.totalRounds} 轮，玩家向你提议：你获得 ${offer} 枚，玩家获得 ${100 - offer} 枚。你有权接受，使双方按此分配；或拒绝，使双方均获得 0。
 历史（JSON）：${JSON.stringify(game.history.slice(-3).map((item) => ({ round: item.round, proposer: item.proposer, offer: item.offer, accepted: item.accepted })))}
 角色底线与性格应影响接受阈值，但不要机械地只按金额阈值。判断这个提案是否值得成交。
-只输出：{"accepted":true或false,"quote":"不超过40字、符合角色口吻的回应"}`
+只输出：{"accepted":true或false,"quote":"不超过40字、符合角色口吻的回应"}`,
+    game.opponent
   );
   if (model && typeof model.accepted === "boolean") {
     return {
@@ -2165,7 +2320,8 @@ async function makeAIProposal() {
     `第 ${game.round}/${game.totalRounds} 轮由你提出分配。桌上有 100 枚金币，你需要提议留给玩家多少枚（0–100），剩余归你。玩家可以接受或拒绝；拒绝时双方都获得 0。
 历史（JSON）：${JSON.stringify(game.history.slice(-3).map((item) => ({ round: item.round, proposer: item.proposer, offer: item.offer, accepted: item.accepted })))}
 请结合角色性格、公平感和历史制定一个可能被接受的提案。
-只输出：{"offer":整数,"quote":"不超过40字、符合角色口吻的提案说明"}`
+只输出：{"offer":整数,"quote":"不超过40字、符合角色口吻的提案说明"}`,
+    game.opponent
   );
   if (model && Number.isFinite(Number(model.offer))) {
     return {
@@ -2423,7 +2579,8 @@ async function decideCommons(game, persona, index) {
 历史（JSON）：${JSON.stringify(past)}
 另一位对手也会独立决定。请思考搭便车、维持公共池和角色性格之间的平衡。
 选择你本轮投入绿洲的整数 0–20。
-只输出：{"contribution":整数,"quote":"不超过36字、符合角色口吻的发言"}`
+只输出：{"contribution":整数,"quote":"不超过36字、符合角色口吻的发言"}`,
+    persona
   );
   if (model && Number.isFinite(Number(model.contribution))) {
     return {
@@ -2609,7 +2766,8 @@ async function decideAuction(game) {
     `当前第 ${game.round}/${game.totalRounds} 轮。藏品的私人估值只属于你：${aiValue} 枚。你和一名对手同时提交密封报价；最高者获胜，并支付自己的报价。你本轮收益 = 获胜时估值 − 报价，未获胜 = 0。
 你看到玩家过去几轮的报价与估值（JSON）：${JSON.stringify(game.history.slice(-4).map((item) => ({ playerBidRatio: Number((item.playerBid / item.playerValue).toFixed(2)), winner: item.winner })))}
 请决定你的整数报价，范围 0–${aiValue}。胜率不是唯一目标，剩余收益同样重要。
-只输出：{"bid":整数,"quote":"不超过36字、符合角色口吻的发言"}`
+只输出：{"bid":整数,"quote":"不超过36字、符合角色口吻的发言"}`,
+    game.opponent
   );
   if (model && Number.isFinite(Number(model.bid))) {
     return {
@@ -2783,26 +2941,31 @@ function localMinorityCrowd(game, validate = false) {
 
 async function decideMinorityCrowd(game) {
   const fallback = localMinorityCrowd(game);
-  const model = await tryAI(
-    game,
-    `你是一名观察连续少数派博弈的行为研究助手。场上有四位性格不同的参与者：${CROWD_PERSONAS.map((item) => item.name).join("、")}。玩家也会独立选边。请模拟这四位参与者的独立决定，只输出 JSON。`,
-    `当前第 ${game.round}/${game.totalRounds} 轮。五个人各自选择 red（赤）或 blue（蓝），选择人数更少一侧的人得 3 分。
+  const results = await Promise.all(
+    game.crowd.map(async (persona, index) => {
+      const model = await tryAI(
+        game,
+        `你是连续少数派博弈中的参与者${persona.name}。五人独立选边，你必须根据自己的判断选择 red 或 blue，只输出 JSON。`,
+        `当前第 ${game.round}/${game.totalRounds} 轮。少数侧获得 3 分。
 历史（JSON）：${JSON.stringify(game.history.slice(-5).map((item) => ({ red: item.redCount, blue: item.blueCount, winner: item.winner, playerChoice: item.playerChoice })))}
-四位参与者会各自使用反身推理：既要避开拥挤，也要猜测别人如何避开拥挤。不要让他们全部选择同一边，除非历史给出很强理由。
-只输出：{"choices":["red或blue", "red或blue", "red或blue", "red或blue"],"quote":"不超过42字的群体观察"}`
+你是独立参与者，不要代表其他人做决定。避开可预见的人群，同时猜测别人也会这样想。
+只输出：{"choice":"red或blue","quote":"不超过30字的个人判断"}`
+        ,
+        persona
+      );
+      return {
+        choice:
+          model && ["red", "blue"].includes(model.choice)
+            ? model.choice
+            : fallback.choices[index],
+        quote: model?.quote ? String(model.quote).slice(0, 70) : ""
+      };
+    })
   );
-  if (
-    model &&
-    Array.isArray(model.choices) &&
-    model.choices.length === 4 &&
-    model.choices.every((choice) => ["red", "blue"].includes(choice))
-  ) {
-    return {
-      choices: model.choices,
-      quote: String(model.quote || fallback.quote).slice(0, 92)
-    };
-  }
-  return fallback;
+  return {
+    choices: results.map((item) => item.choice),
+    quote: results.find((item) => item.quote)?.quote || fallback.quote
+  };
 }
 
 async function playMinorityRound(playerChoice) {
@@ -2996,27 +3159,33 @@ function localCouncilVotes(game) {
 async function decideCouncilVotes(game) {
   const fallbackVotes = localCouncilVotes(game);
   const bill = game.bills[game.round - 1];
-  const model = await tryAI(
-    game,
-    "你是多人隐藏阵营议会中的席位代理。四名议员各有秘密立场，必须只输出结构化投票。",
-    `当前第 ${game.round}/${game.totalRounds} 轮。议案「${bill.title}」若通过，${game.factions[bill.favor].name}获得 10 席；若否决，${game.factions[bill.favor === "court" ? "rebel" : "court"].name}获得 10 席。
-四名议员身份：${JSON.stringify(game.agents.map((agent, index) => ({ index, name: agent.name, team: game.factions[agent.team].name, role: agent.role, traits: agent.traits })))}
+  const results = await Promise.all(
+    game.agents.map(async (agent, index) => {
+      const model = await tryAI(
+        game,
+        `你是隐藏阵营议会中的${agent.name}，身份为${agent.role}，性格标签为${agent.traits.join("、")}。你的秘密阵营是${game.factions[agent.team].name}。只输出 JSON。`,
+        `当前第 ${game.round}/${game.totalRounds} 轮。议案「${bill.title}」若通过，${game.factions[bill.favor].name}获得 10 席；若否决，${game.factions[bill.favor === "court" ? "rebel" : "court"].name}获得 10 席。
 当前席位：曜庭 ${game.factions.court.score}，灰盟 ${game.factions.rebel.score}。
-历史公开票型：${JSON.stringify(game.history.slice(-3).map((item) => ({ bill: item.bill.title, favor: item.bill.favor, passingVotes: item.passingVotes, player: item.playerVote })))}
-每名议员以己方最终席位为目标，并可根据发言与局势采取隐蔽策略。请决定四人的 yes/no 票。
-只输出：{"votes":["yes或no","yes或no","yes或no","yes或no"],"quote":"不超过42字的议会气氛描述"}`
+公开历史：${JSON.stringify(game.history.slice(-3).map((item) => ({ bill: item.bill.title, favor: item.bill.favor, passingVotes: item.passingVotes, player: item.playerVote })))}
+以你所属阵营的最终席位为目标决定本轮 yes/no 票。不要代表其他人发言。
+只输出：{"vote":"yes或no","quote":"不超过30字的个人发言"}`
+        ,
+        agent
+      );
+      return {
+        vote:
+          model && ["yes", "no"].includes(model.vote)
+            ? model.vote
+            : fallbackVotes[index],
+        quote: model?.quote ? String(model.quote).slice(0, 70) : ""
+      };
+    })
   );
-  if (
-    model &&
-    Array.isArray(model.votes) &&
-    model.votes.length === 4 &&
-    model.votes.every((vote) => ["yes", "no"].includes(vote))
-  ) {
-    return { votes: model.votes, quote: String(model.quote || "").slice(0, 92) };
-  }
   return {
-    votes: fallbackVotes,
-    quote: "几道目光在议案上停留得比话语更久。"
+    votes: results.map((item) => item.vote),
+    quote:
+      results.find((item) => item.quote)?.quote ||
+      "几道目光在议案上停留得比话语更久。"
   };
 }
 
@@ -3207,34 +3376,40 @@ async function decideWastelandActions(game) {
   const leader = [...game.agents, { id: "player", energy: game.playerEnergy }].sort(
     (a, b) => b.energy - a.energy
   )[0];
-  const model = await tryAI(
-    game,
-    "你是四人生存博弈的行动代理，负责为三名独立领队同时制定行动。只输出结构化行动。",
-    `当前第 ${game.round}/${game.totalRounds} 轮。参与者能量：你 ${game.playerEnergy}，${game.agents.map((agent) => `${agent.name} ${agent.energy}`).join("，")}。当前领先者：${leader.id === "player" ? "玩家" : leader.name}。
-三名领队：${JSON.stringify(game.agents.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role, traits: agent.traits, energy: agent.energy })))}
+  const validIds = new Set(["player", ...game.agents.map((agent) => agent.id)]);
+  const results = await Promise.all(
+    game.agents.map(async (agent, index) => {
+      const model = await tryAI(
+        game,
+        `你是荒原混战中的领队${agent.name}，身份为${agent.role}，性格标签为${agent.traits.join("、")}。你只为自己的队伍做决定，只输出 JSON。`,
+        `当前第 ${game.round}/${game.totalRounds} 轮。你的能量 ${agent.energy}，玩家 ${game.playerEnergy}，其他领队 ${game.agents.filter((item) => item.id !== agent.id).map((item) => `${item.name} ${item.energy}`).join("，")}。当前领先者：${leader.id === "player" ? "玩家" : leader.name}。
 历史（JSON）：${JSON.stringify(game.history.slice(-3).map((item) => ({ actions: item.actions, energyAfter: item.energyAfter })))}
-每名领队选择 gather（+4）、raid（指定 target 夺取 3；目标筑防则自己 −2）或 fortify（+1 并挡下针对自己的劫掠）。target 只能是 player 或另一位 agent 的 id，不能选择自己。
-只输出：{"agents":[{"agent":"agent0","action":"gather或raid或fortify","target":"player或agentN"}],"quote":"不超过42字的荒原观察"}`
-  );
-  if (
-    model &&
-    Array.isArray(model.agents) &&
-    model.agents.length === game.agents.length
-  ) {
-    const validIds = new Set(["player", ...game.agents.map((agent) => agent.id)]);
-    const actions = game.agents.map((agent, index) => {
-      const choice = model.agents.find((item) => item?.agent === agent.id) || model.agents[index];
-      const action = ["gather", "raid", "fortify"].includes(choice?.action)
-        ? choice.action
+选择 gather（+4）、raid（夺取 3；目标筑防则自己 −2）或 fortify（+1 并挡下劫掠）。target 只能是 player 或另一位领队的 id，不能选择自己。
+只输出：{"action":"gather或raid或fortify","target":"player或agentN","quote":"不超过30字的个人判断"}`
+        ,
+        agent
+      );
+      const action = ["gather", "raid", "fortify"].includes(model?.action)
+        ? model.action
         : fallback[index].action;
-      const target = validIds.has(choice?.target) && choice.target !== agent.id
-        ? choice.target
-        : fallback[index].target;
-      return { agent: agent.id, action, target };
-    });
-    return { actions, quote: String(model.quote || "").slice(0, 92) };
-  }
-  return { actions: fallback, quote: "今晚的荒原很安静，安静得不够可信。" };
+      const target =
+        validIds.has(model?.target) && model.target !== agent.id
+          ? model.target
+          : fallback[index].target;
+      return {
+        agent: agent.id,
+        action,
+        target,
+        quote: model?.quote ? String(model.quote).slice(0, 70) : ""
+      };
+    })
+  );
+  return {
+    actions: results.map(({ quote, ...item }) => item),
+    quote:
+      results.find((item) => item.quote)?.quote ||
+      "今晚的荒原很安静，安静得不够可信。"
+  };
 }
 
 async function submitWastelandAction() {
@@ -3444,27 +3619,35 @@ function localAllianceChoices(game) {
 async function decideAllianceChoices(game) {
   const fallback = localAllianceChoices(game);
   const participantIds = ["player", ...game.agents.map((agent) => agent.id)];
-  const model = await tryAI(
-    game,
-    "你是四人联盟配对博弈的行为代理，为三名棋手选择本轮盟友。只输出结构化选择。",
-    `当前第 ${game.round}/${game.totalRounds} 轮。四名参与者 id：${participantIds.join("、")}。每人秘密选择一名其他人；双方互选则各得 5 分，否则得 1 分。
-三名棋手：${JSON.stringify(game.agents.map((agent) => ({ id: agent.id, name: agent.name, type: agent.type, role: agent.role, traits: agent.traits, score: agent.score, lastTarget: agent.lastPartner })))}
+  const results = await Promise.all(
+    game.agents.map(async (agent, index) => {
+      const model = await tryAI(
+        game,
+        `你是四人联盟配对博弈中的棋手${agent.name}，身份为${agent.role}，性格标签为${agent.traits.join("、")}。你只为自己选择盟友，只输出 JSON。`,
+        `当前第 ${game.round}/${game.totalRounds} 轮。参与者 id：${participantIds.join("、")}。秘密选择一名其他人；双方互选则各得 5 分，否则得 1 分。
+你的累计 ${agent.score} 分，上一轮选择了 ${agent.lastPartner}。
 公开历史箭头：${JSON.stringify(game.history.slice(-3).map((item) => ({ playerTarget: item.playerTarget, agentTargets: item.agentTargets, pacts: item.pacts })))}
-请为三名棋手各自选择一个目标 id，不能选择自己。可回报上轮朝自己伸出的手，也可转换关系。
-只输出：{"agents":[{"agent":"agent0","target":"目标id"},{"agent":"agent1","target":"目标id"},{"agent":"agent2","target":"目标id"}],"quote":"不超过42字的棋局观察"}`
+选择一个目标 id，不能选择自己。可回报上轮朝你伸出的手，也可转换关系。
+只输出：{"target":"目标id","quote":"不超过30字的个人判断"}`
+        ,
+        agent
+      );
+      return {
+        agent: agent.id,
+        target:
+          participantIds.includes(model?.target) && model.target !== agent.id
+            ? model.target
+            : fallback[index].target,
+        quote: model?.quote ? String(model.quote).slice(0, 70) : ""
+      };
+    })
   );
-  if (model && Array.isArray(model.agents) && model.agents.length === game.agents.length) {
-    const choices = game.agents.map((agent, index) => {
-      const item = model.agents.find((entry) => entry?.agent === agent.id) || model.agents[index];
-      const target =
-        participantIds.includes(item?.target) && item.target !== agent.id
-          ? item.target
-          : fallback[index].target;
-      return { agent: agent.id, target };
-    });
-    return { choices, quote: String(model.quote || "").slice(0, 92) };
-  }
-  return { choices: fallback, quote: "几条墨线正在纸面上寻找彼此。" };
+  return {
+    choices: results.map(({ quote, ...item }) => item),
+    quote:
+      results.find((item) => item.quote)?.quote ||
+      "几条墨线正在纸面上寻找彼此。"
+  };
 }
 
 async function submitAlliance() {
@@ -3644,32 +3827,36 @@ function localBlitzAllocations(game, budget) {
 async function decideBlitzAllocations(game, budget) {
   const fallback = localBlitzAllocations(game, budget);
   const frontValues = [1, 2, 3, 4, 5];
-  const model = await tryAI(
-    game,
-    "你是五域争衡的资源分配代理，为两名统帅同时制定阵图。只输出结构化兵力分配。",
-    `当前第 ${game.round}/${game.totalRounds} 轮，每名统帅共有 ${budget} 名兵力。五处边域按 0–4 编号，声望分别为 ${frontValues.join("、")}。每处兵力最多者得分，并列第一无人得分。
-两名统帅：${JSON.stringify(game.agents.map((agent) => ({ id: agent.id, name: agent.name, type: agent.type, traits: agent.traits, score: agent.score })))}
-历史阵图：${JSON.stringify(game.history.slice(-2).map((item) => ({ player: item.playerAllocation, agents: item.agentAllocations, winners: item.battles.map((battle) => battle.winner) })))}
-每名统帅的 allocation 必须是 5 个非负整数，总和严格等于 ${budget}。
-只输出：{"agents":[{"agent":"agent0","allocation":[五个整数]},{"agent":"agent1","allocation":[五个整数]}],"quote":"不超过42字的布阵判断"}`
-  );
-  if (model && Array.isArray(model.agents)) {
-    const allocations = game.agents.map((agent, index) => {
-      const item = model.agents.find((entry) => entry?.agent === agent.id) || model.agents[index];
-      const candidate = item?.allocation;
-      if (
+  const results = await Promise.all(
+    game.agents.map(async (agent, index) => {
+      const model = await tryAI(
+        game,
+        `你是五域争衡中的统帅${agent.name}，身份为${agent.role}，性格标签为${agent.traits.join("、")}。你只为自己制定阵图，只输出 JSON。`,
+        `当前第 ${game.round}/${game.totalRounds} 轮，你有 ${budget} 名兵力。五处边域按 0–4 编号，声望分别为 ${frontValues.join("、")}。每处兵力最多者得分，并列第一无人得分。
+你的累计 ${agent.score} 分。历史阵图：${JSON.stringify(game.history.slice(-2).map((item) => ({ player: item.playerAllocation, agents: item.agentAllocations, winners: item.battles.map((battle) => battle.winner) })))}
+allocation 必须是 5 个非负整数，总和严格等于 ${budget}。
+只输出：{"allocation":[五个整数],"quote":"不超过30字的个人判断"}`
+        ,
+        agent
+      );
+      const candidate = model?.allocation;
+      const valid =
         Array.isArray(candidate) &&
         candidate.length === 5 &&
-        candidate.every((value) => Number.isFinite(Number(value)) && Number(value) >= 0) &&
-        candidate.reduce((sum, value) => sum + Number(value), 0) === budget
-      ) {
-        return candidate.map((value) => Math.round(Number(value)));
-      }
-      return fallback[index];
-    });
-    return { allocations, quote: String(model.quote || "").slice(0, 92) };
-  }
-  return { allocations: fallback, quote: "五张阵图看上去都很安静。" };
+        candidate.every((value) => Number.isInteger(Number(value)) && Number(value) >= 0) &&
+        candidate.reduce((sum, value) => sum + Number(value), 0) === budget;
+      return {
+        allocation: valid ? candidate.map(Number) : fallback[index],
+        quote: model?.quote ? String(model.quote).slice(0, 70) : ""
+      };
+    })
+  );
+  return {
+    allocations: results.map((item) => item.allocation),
+    quote:
+      results.find((item) => item.quote)?.quote ||
+      "五张阵图看上去都很安静。"
+  };
 }
 
 async function submitBlitz() {
@@ -3956,55 +4143,124 @@ function closeModal() {
 }
 
 function settingsModal() {
-  const key = sessionKey();
+  apiProfileDrafts = structuredClone(store.settings.profiles);
+  renderApiSettingsModal();
+}
+
+function renderApiSettingsModal() {
+  const en = appLanguage === "en";
   openModal(`
     <div class="modal-header">
       <div class="modal-heading">
-        <span class="eyebrow">INTELLIGENCE SETTINGS</span>
-        <h2 id="modal-title">AI 对手设置</h2>
-        <p>连接 DeepSeek 后，角色会结合局势、历史与性格实时思考；失败时自动回退到本地策略。</p>
+        <span class="eyebrow">AGENT INTELLIGENCE</span>
+        <h2 id="modal-title">${en ? "Agent API Profiles" : "智能体 API 配置"}</h2>
+        <p>${en ? "Assign a model, endpoint, and API key to each opponent or teammate." : "为每个对手、队友或群体成员分别绑定模型、接口与 API Key。"}</p>
       </div>
-      <button class="modal-close" data-action="close-modal" type="button" aria-label="关闭"></button>
+      <button class="modal-close" data-action="close-modal" type="button" aria-label="${en ? "Close" : "关闭"}"></button>
     </div>
     <div class="modal-body">
       <div class="provider-status">
         <span class="provider-status-icon">${icon("brain")}</span>
         <span class="provider-status-copy">
-          <strong>${serverStatus.serverConfigured ? "服务端已配置 DeepSeek" : key ? "临时 Key 已连接" : "当前运行本地策略"}</strong>
-          <small>${serverStatus.serverConfigured ? "配置来自 .env，浏览器无需再次填写。" : "本地策略不消耗 API 额度，也能完整游玩所有游戏。"}</small>
+          <strong>${serverStatus.serverConfigured ? (en ? "Server key available" : "服务端 Key 可用") : aiAvailable() ? (en ? "Agent keys configured" : "智能体 Key 已配置") : (en ? "Local strategy active" : "当前运行本地策略")}</strong>
+          <small>${en ? "A profile without a key uses the server key when available, otherwise local strategy." : "未填写 Key 的配置会使用服务端 Key；没有服务端 Key 时使用本地策略。"}</small>
         </span>
       </div>
-      <div class="form-group">
-        <label for="settings-key">DeepSeek API Key <span>${key ? "已填临时 Key" : "推荐使用 .env 配置"}</span></label>
-        <input class="field" id="settings-key" type="password" autocomplete="off" placeholder="${serverStatus.serverConfigured ? "服务端已配置，可留空" : "sk-..."}" value="${escapeHTML(key)}" />
-        <p class="field-hint">临时 Key 只保存在当前标签页的 <code>sessionStorage</code> 中，经本机代理调用，关闭标签页即清除。</p>
+      <div class="api-profile-grid">
+        ${apiProfileDrafts
+          .map(
+            (profile, index) => `
+              <section class="api-profile-card" data-profile-id="${escapeHTML(profile.id)}">
+                <div class="api-profile-head">
+                  <span class="api-profile-index">${String(index + 1).padStart(2, "0")}</span>
+                  <div>
+                    <strong>${escapeHTML(profile.name)}</strong>
+                    <small>${profileAvailable(profile) ? (en ? "API READY" : "API 可用") : (en ? "LOCAL FALLBACK" : "本地后备")}</small>
+                  </div>
+                  ${profile.id === "default" ? `<span class="api-default-badge">${en ? "PRIMARY" : "主配置"}</span>` : `<button class="api-remove" data-action="remove-api-profile" data-profile-id="${escapeHTML(profile.id)}" type="button" aria-label="${en ? "Remove profile" : "删除配置"}">×</button>`}
+                </div>
+                <div class="api-profile-fields">
+                  <label>
+                    <span>${en ? "Profile name" : "配置名称"}</span>
+                    <input class="field" data-profile-field="name" value="${escapeHTML(profile.name)}" maxlength="24" />
+                  </label>
+                  <label>
+                    <span>${en ? "Model" : "模型"}</span>
+                    <input class="field" data-profile-field="model" value="${escapeHTML(profile.model || "deepseek-chat")}" placeholder="deepseek-chat" />
+                  </label>
+                  <label class="wide">
+                    <span>${en ? "API base URL" : "API 根地址"}</span>
+                    <input class="field" data-profile-field="baseUrl" value="${escapeHTML(profile.baseUrl || "https://api.deepseek.com")}" placeholder="https://api.deepseek.com" />
+                  </label>
+                  <label class="wide">
+                    <span>${en ? "API key" : "API Key"}</span>
+                    <input class="field" data-profile-field="key" type="password" autocomplete="off" value="${escapeHTML(sessionKey(profile.id))}" placeholder="${serverStatus.serverConfigured ? (en ? "Server key available; optional" : "服务端 Key 可用，可留空") : "sk-..."}" />
+                  </label>
+                </div>
+                <div class="api-profile-foot">
+                  <span>${en ? "OpenAI-compatible Chat Completions" : "OpenAI 兼容 Chat Completions"}</span>
+                  <button class="button button-quiet button-small" data-action="test-ai" data-profile-id="${escapeHTML(profile.id)}" type="button">${icon("zap")} ${en ? "Test" : "测试"}</button>
+                </div>
+                <div class="test-result" data-profile-test="${escapeHTML(profile.id)}"></div>
+              </section>`
+          )
+          .join("")}
       </div>
-      <div class="form-group">
-        <label for="settings-model">模型 <span>OpenAI 兼容 Chat Completions</span></label>
-        <input class="field" id="settings-model" type="text" value="${escapeHTML(store.settings.model || "deepseek-chat")}" placeholder="deepseek-chat" />
+      <div class="api-profile-tools">
+        <button class="button button-secondary button-small" data-action="add-api-profile" type="button">${icon("users")} ${en ? "Add agent profile" : "新增智能体配置"}</button>
+        <span>${en ? "Keys stay in this tab and are proxied locally." : "Key 仅保存在当前标签页，并由本机服务代理。"}</span>
       </div>
-      <div class="form-group">
-        <label for="settings-endpoint">API 根地址 <span>无需包含 /chat/completions</span></label>
-        <input class="field" id="settings-endpoint" type="url" value="${escapeHTML(store.settings.baseUrl || "https://api.deepseek.com")}" placeholder="https://api.deepseek.com" />
-      </div>
-      <div class="test-result" id="ai-test-result" role="status"></div>
       <div class="modal-actions">
-        <button class="button button-quiet button-small" data-action="test-ai" type="button">${icon("zap")} 测试连接</button>
-        <button class="button button-secondary button-small" data-action="close-modal" type="button">取消</button>
-        <button class="button button-primary button-small" data-action="save-settings" type="button">保存设置</button>
+        <button class="button button-secondary button-small" data-action="close-modal" type="button">${en ? "Cancel" : "取消"}</button>
+        <button class="button button-primary button-small" data-action="save-settings" type="button">${en ? "Save profiles" : "保存配置"}</button>
       </div>
     </div>
-  `);
+  `, true);
 }
 
-async function testAISettings() {
-  const result = $("#ai-test-result");
+function captureApiDraftInputs() {
+  $$(".api-profile-card").forEach((card) => {
+    const profile = apiProfileDrafts.find((item) => item.id === card.dataset.profileId);
+    if (!profile) return;
+    profile.name = $('[data-profile-field="name"]', card)?.value.trim() || profile.name;
+    profile.model = $('[data-profile-field="model"]', card)?.value.trim() || "deepseek-chat";
+    profile.baseUrl = $('[data-profile-field="baseUrl"]', card)?.value.trim() || "https://api.deepseek.com";
+  });
+}
+
+function addApiProfile() {
+  captureApiDraftInputs();
+  if (apiProfileDrafts.length >= 6) {
+    toast(appLanguage === "en" ? "Up to six profiles per browser." : "每个浏览器最多配置六组接口。", "error");
+    return;
+  }
+  const nextNumber = apiProfileDrafts.length + 1;
+  apiProfileDrafts.push({
+    id: `agent-${Date.now().toString(36)}`,
+    name: appLanguage === "en" ? `Agent ${nextNumber}` : `智能体 ${nextNumber}`,
+    model: "deepseek-chat",
+    baseUrl: "https://api.deepseek.com"
+  });
+  renderApiSettingsModal();
+}
+
+function removeApiProfile(profileId) {
+  captureApiDraftInputs();
+  apiProfileDrafts = apiProfileDrafts.filter(
+    (profile) => profile.id === "default" || profile.id !== profileId
+  );
+  renderApiSettingsModal();
+}
+
+async function testAISettings(profileId) {
+  const card = $(`.api-profile-card[data-profile-id="${CSS.escape(profileId)}"]`);
+  const result = card ? $("[data-profile-test]", card) : null;
   if (!result) return;
-  const key = $("#settings-key")?.value.trim() || "";
-  const model = $("#settings-model")?.value.trim() || "deepseek-chat";
-  const baseUrl = $("#settings-endpoint")?.value.trim() || "https://api.deepseek.com";
+  const key = $('[data-profile-field="key"]', card)?.value.trim() || "";
+  const model = $('[data-profile-field="model"]', card)?.value.trim() || "deepseek-chat";
+  const baseUrl = $('[data-profile-field="baseUrl"]', card)?.value.trim() || "https://api.deepseek.com";
   result.className = "test-result visible loading";
-  result.textContent = "正在请求模型，请稍候…";
+  result.textContent = appLanguage === "en" ? "Testing endpoint…" : "正在测试接口…";
   try {
     const response = await fetch("/api/ai", {
       method: "POST",
@@ -4022,24 +4278,45 @@ async function testAISettings() {
       throw new Error(data.message || "连接测试失败");
     }
     result.className = "test-result visible success";
-    result.textContent = `连接成功：${data.model || model} 已返回有效结构化响应。`;
+    result.textContent = appLanguage === "en" ? `Connected to ${data.model || model}.` : `连接成功：${data.model || model}。`;
   } catch (error) {
     result.className = "test-result visible error";
-    result.textContent = `${error.message}。你仍可使用本地策略完成所有对局。`;
+    result.textContent = `${error.message}${appLanguage === "en" ? " Local fallback remains available." : " 仍可使用本地策略。"}`;
   }
 }
 
 function saveSettings() {
-  const key = $("#settings-key")?.value.trim() || "";
-  const model = $("#settings-model")?.value.trim() || "deepseek-chat";
-  const baseUrl = $("#settings-endpoint")?.value.trim() || "https://api.deepseek.com";
-  saveSessionKey(key);
-  store.settings.model = model;
-  store.settings.baseUrl = baseUrl;
+  captureApiDraftInputs();
+  store.settings.profiles
+    .filter((profile) => !apiProfileDrafts.some((draft) => draft.id === profile.id))
+    .forEach((profile) => saveSessionKey("", profile.id));
+  $$(".api-profile-card").forEach((card) => {
+    const key = $('[data-profile-field="key"]', card)?.value.trim() || "";
+    saveSessionKey(key, card.dataset.profileId);
+  });
+  store.settings.profiles = structuredClone(apiProfileDrafts);
+  Object.values(store.settings.bindings || {}).forEach((gameBindings) => {
+    Object.entries(gameBindings).forEach(([actorId, profileId]) => {
+      if (!store.settings.profiles.some((profile) => profile.id === profileId)) {
+        delete gameBindings[actorId];
+      }
+    });
+  });
+  if (currentGame) {
+    intelligenceActors(currentGame).forEach((actor) => {
+      if (!store.settings.profiles.some((profile) => profile.id === actor.profileId)) {
+        actor.profileId = "default";
+      }
+    });
+  }
+  const primary = getApiProfile("default");
+  store.settings.model = primary.model;
+  store.settings.baseUrl = primary.baseUrl;
   saveStore();
   closeModal();
   updateChrome();
-  toast(key ? "AI 设置已保存，本次对局将优先使用 DeepSeek。" : serverStatus.serverConfigured ? "已使用服务端 DeepSeek 配置。" : "已保留本地策略模式。");
+  toast(appLanguage === "en" ? "Agent profiles saved." : "智能体接口配置已保存。");
+  if (routeName().startsWith("game/") && currentGame) updateGameRoom();
   if (routeName() === "home" || routeName() === "arena") renderRoute();
 }
 
@@ -4226,7 +4503,9 @@ document.addEventListener("click", (event) => {
   else if (action === "open-insights") insightsModal();
   else if (action === "edit-profile") profileModal();
   else if (action === "close-modal") closeModal();
-  else if (action === "test-ai") testAISettings();
+  else if (action === "test-ai") testAISettings(actionNode.dataset.profileId);
+  else if (action === "add-api-profile") addApiProfile();
+  else if (action === "remove-api-profile") removeApiProfile(actionNode.dataset.profileId);
   else if (action === "save-settings") saveSettings();
   else if (action === "save-profile") saveProfile();
 });
@@ -4235,6 +4514,12 @@ document.addEventListener("input", (event) => {
   if (event.target.id === "offer-slider") updateSliderUI("offer", event.target);
   else if (event.target.id === "contribution-slider") updateSliderUI("contribution", event.target);
   else if (event.target.id === "bid-slider") updateSliderUI("bid", event.target);
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-agent-profile]")) {
+    setActorProfile(event.target.dataset.actorId, event.target.value);
+  }
 });
 
 document.addEventListener("keydown", (event) => {
