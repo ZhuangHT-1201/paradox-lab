@@ -2256,6 +2256,126 @@ svg {
   color: #6f823c;
 }
 
+.focus-rail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.focus-rail.staked {
+  border-color: rgba(233, 101, 67, 0.24);
+  background: rgba(233, 101, 67, 0.045);
+}
+
+.focus-resource,
+.focus-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.focus-resource small {
+  color: var(--ink-faint);
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.focus-resource > span {
+  display: flex;
+  gap: 3px;
+}
+
+.focus-resource i {
+  width: 6px;
+  height: 6px;
+  border: 1px solid rgba(23, 55, 44, 0.2);
+  border-radius: 50%;
+}
+
+.focus-resource i.on {
+  border-color: var(--forest);
+  background: var(--forest);
+}
+
+.focus-resource strong {
+  color: var(--ink-soft);
+  font-size: 7px;
+  font-weight: 600;
+}
+
+.focus-actions button {
+  display: inline-flex;
+  height: 27px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 7px;
+}
+
+.focus-actions button:hover:not(:disabled) {
+  color: var(--forest);
+  border-color: rgba(23, 55, 44, 0.24);
+  background: rgba(217, 229, 138, 0.12);
+}
+
+.focus-actions button.active {
+  color: #fff;
+  border-color: var(--coral);
+  background: var(--coral);
+}
+
+.focus-actions button:disabled {
+  opacity: 0.28;
+}
+
+.focus-actions svg {
+  width: 11px;
+  height: 11px;
+}
+
+.focus-state {
+  color: var(--ink-faint);
+  font-size: 7px;
+  letter-spacing: 0.05em;
+}
+
+.focus-state.staked {
+  color: var(--coral);
+  font-weight: 750;
+}
+
+.intel-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: -4px 0 14px;
+  padding: 9px 11px;
+  border-left: 2px solid #7f9560;
+  border-radius: 0 8px 8px 0;
+  color: var(--ink-soft);
+  background: rgba(217, 229, 138, 0.1);
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.intel-strip svg {
+  flex: 0 0 11px;
+  width: 11px;
+  margin-top: 1px;
+  color: #71874e;
+}
+
 .duel-scene {
   display: grid;
   flex: 1;
@@ -4726,6 +4846,18 @@ svg {
 }
 
 @media (max-width: 650px) {
+  .focus-rail {
+    align-items: flex-start;
+  }
+
+  .focus-actions {
+    gap: 4px;
+  }
+
+  .focus-actions button {
+    padding: 0 6px;
+  }
+
   .page-shell {
     padding-right: 17px;
     padding-left: 17px;

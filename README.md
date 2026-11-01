@@ -15,6 +15,7 @@ Paradox Lab turns cooperation, bargaining, public goods, auctions, hidden factio
 - **DeepSeek integration** through a local server proxy. API keys never enter the frontend bundle.
 - **Local strategy fallback** for every game when no API key is configured.
 - **Real-time multiplayer-style systems**: hidden factions, simultaneous moves, forced coalition matching, and multi-front resource allocation.
+- **Tactical Focus**: each match gives two Focus tokens. Spend one to scan an opponent tendency or raise the stakes for a +2 / −2 round swing.
 - **Persistent match archive** and a four-axis decision profile stored locally.
 - **Responsive, dependency-free frontend** with no build step.
 
@@ -61,6 +62,7 @@ Use the `EN` / `中` control in the header, or press `Alt+L`. The interface lang
 Additional shortcuts:
 
 - `Alt+R` starts a random game.
+- `F` raises the stakes for the current round while the game board has focus.
 - `Enter` advances after a round when the main page has focus.
 - `Esc` closes an open dialog.
 

@@ -991,6 +991,7 @@ function baseGame(gameId) {
     busy: false,
     recorded: false,
     usedDeepSeek: false,
+    focus: 2,
     opponent: {},
     startedAt: new Date().toISOString()
   };
@@ -1385,6 +1386,7 @@ function renderGame(gameId) {
 function updateGameRoom() {
   if (!currentGame) return;
   const game = currentGame;
+  if (game.status === "resolved") resolveFocusStake(game);
   const roundNode = $("#round-indicator");
   if (roundNode) {
     roundNode.innerHTML = `
@@ -1430,9 +1432,179 @@ function stageFrame(game, content, brief) {
         </span>
       </header>
       <div class="stage-body">
+        ${game.status === "finished" ? "" : focusBarMarkup(game)}
         ${content}
       </div>
     </section>`;
+}
+
+function focusBarMarkup(game) {
+  const isEnglish = appLanguage === "en";
+  const staked = Boolean(game.roundData?.staked);
+  const scanned = Boolean(game.roundData?.scanned);
+  const canFocus = ["choosing", "ai_offer"].includes(game.status);
+  const intel = game.roundData?.intel;
+  return `
+    <div class="focus-rail ${staked ? "staked" : ""}">
+      <div class="focus-resource">
+        <small>${isEnglish ? "FOCUS" : "专注"}</small>
+        <span>${[0, 1].map((index) => `<i class="${index < game.focus ? "on" : ""}"></i>`).join("")}</span>
+        <strong>${game.focus}/2</strong>
+      </div>
+      ${
+        canFocus
+          ? `<div class="focus-actions">
+              <button data-game-action="focus-scan" type="button" ${scanned || game.focus < 1 ? "disabled" : ""}>${icon("eye")} ${isEnglish ? "Scan" : "侦察"} · 1</button>
+              <button data-game-action="focus-stake" type="button" ${staked || game.focus < 1 ? "disabled" : ""} class="${staked ? "active" : ""}">${icon("flame")} ${isEnglish ? "Stake" : "押注"} · 1</button>
+            </div>`
+          : `<span class="focus-state ${staked ? "staked" : ""}">${staked ? (isEnglish ? "HIGH STAKES · +2 WIN / −2 LOSS" : "高风险 · 胜 +2 / 负 −2") : ""}</span>`
+      }
+    </div>
+    ${
+      intel
+        ? `<div class="intel-strip">${icon("eye")}<span>${escapeHTML(intel)}</span></div>`
+        : ""
+    }`;
+}
+
+function useFocusScan() {
+  const game = currentGame;
+  if (!game || !["choosing", "ai_offer"].includes(game.status) || game.focus < 1 || game.roundData?.scanned) return;
+  game.focus -= 1;
+  game.roundData.scanned = true;
+  game.roundData.intel = gameIntel(game);
+  updateGameRoom();
+}
+
+function useFocusStake() {
+  const game = currentGame;
+  if (!game || !["choosing", "ai_offer"].includes(game.status) || game.focus < 1 || game.roundData?.staked) return;
+  game.focus -= 1;
+  game.roundData.staked = true;
+  updateGameRoom();
+}
+
+function gameIntel(game) {
+  const en = appLanguage === "en";
+  if (game.gameId === "prisoner") {
+    const last = game.history.at(-1)?.playerAction;
+    if (game.opponent.type === "echo") {
+      return en
+        ? `Echo is most likely to mirror your last move: ${last === "defect" ? "DEFECT" : "COOPERATE"}.`
+        : `回声最可能复制你上一轮的「${last === "defect" ? "背叛" : "合作"}」。`;
+    }
+    if (game.opponent.type === "garden") {
+      return en
+        ? "The long-game gardener is biased toward COOPERATE and forgives one betrayal."
+        : "长期主义园丁倾向「合作」，通常会容忍一次背叛。";
+    }
+    return en
+      ? "The opportunist is more likely to DEFECT after you cooperate."
+      : "机会主义者更可能在你合作后选择「背叛」。";
+  }
+  if (game.gameId === "ultimatum") {
+    if (game.round % 2 === 0) {
+      return en
+        ? `Their usual opening split is near ${game.opponent.generosity} coins.`
+        : `对方通常会给约 ${game.opponent.generosity} 枚。`;
+    }
+    return en
+      ? `Their acceptance floor sits near ${game.opponent.threshold} coins.`
+      : `对方的可接受底线约为 ${game.opponent.threshold} 枚。`;
+  }
+  if (game.gameId === "commons") {
+    const historyAverage = game.history.length
+      ? game.history.reduce((sum, item) => sum + (item.contributions[1] + item.contributions[2]) / 2, 0) / game.history.length
+      : 10;
+    return en
+      ? `The two stewards are leaning toward ${Math.round(historyAverage)}–${Math.round(historyAverage + 5)} total contribution.`
+      : `两位共治者本轮倾向合计投入 ${Math.round(historyAverage)}–${Math.round(historyAverage + 5)}。`;
+  }
+  if (game.gameId === "auction") {
+    const low = Math.round(game.opponent.aggression * 100 - 8);
+    const high = Math.round(game.opponent.aggression * 100 + 7);
+    return en
+      ? `Their sealed bids usually land between ${low}% and ${high}% of private value.`
+      : `对方的密封报价通常落在私人估值的 ${low}%–${high}%。`;
+  }
+  if (game.gameId === "minority") {
+    const last = game.history.at(-1);
+    return en
+      ? `Crowd signal: ${last ? `the side that lost last round is likely to attract one follower.` : "the initial crowd is split and no side is crowded yet."}`
+      : `群体信号：${last ? "上一轮落败的一侧可能吸引一名跟随者。" : "首轮人群尚未拥挤，两侧都有人试探。"}`;
+  }
+  if (game.gameId === "council") {
+    const agent = pick(game.agents);
+    const bill = game.bills[game.round - 1];
+    const supports = agent.team === bill.favor;
+    return en
+      ? `${agent.name} belongs to ${game.factions[agent.team].name} and leans ${supports ? "YES" : "NO"}.`
+      : `${agent.name}属于${game.factions[agent.team].name}，本轮倾向「${supports ? "赞成" : "反对"}」。`;
+  }
+  if (game.gameId === "wasteland") {
+    const leaderId = [
+      { id: "player", energy: game.playerEnergy },
+      ...game.agents.map((agent) => ({ id: agent.id, energy: agent.energy }))
+    ].sort((a, b) => b.energy - a.energy)[0].id;
+    return en
+      ? `Raid pressure is concentrating on ${leaderId === "player" ? "you" : participantName(game, leaderId)}.`
+      : `劫掠压力正在集中到${leaderId === "player" ? "你" : participantName(game, leaderId)}身上。`;
+  }
+  if (game.gameId === "alliance") {
+    const agent = pick(game.agents);
+    return en
+      ? `${agent.name} has recently favored ${participantName(game, agent.lastPartner)} and values reciprocity.`
+      : `${agent.name}近期更偏向${participantName(game, agent.lastPartner)}，重视互惠。`;
+  }
+  return en
+    ? `${game.agents[0].name} is most likely to concentrate on Front 05; ${game.agents[1].name} tends to shift fronts.`
+    : `${game.agents[0].name}最可能集中兵力于 05 号边域，${game.agents[1].name}偏向轮换重心。`;
+}
+
+function roundOpponentPoints(game) {
+  const data = game.roundData;
+  if (["prisoner", "ultimatum", "auction", "council"].includes(game.gameId)) {
+    return Number(data.aiPoints || 0);
+  }
+  if (game.gameId === "commons") {
+    return (Number(data.payouts?.[1] || 0) + Number(data.payouts?.[2] || 0)) / 2;
+  }
+  if (game.gameId === "minority") {
+    return data.crowdPoints?.reduce((sum, value) => sum + value, 0) / Math.max(1, data.crowdPoints?.length || 1);
+  }
+  if (game.gameId === "wasteland") {
+    return Math.max(...data.actions.filter((item) => item.id !== "player").map((item) => item.delta));
+  }
+  if (game.gameId === "alliance") {
+    const choices = {
+      player: data.playerTarget,
+      ...Object.fromEntries(game.agents.map((agent, index) => [agent.id, data.agentTargets[index]]))
+    };
+    return Math.max(...game.agents.map((agent) => (choices[choices[agent.id]] === agent.id ? 5 : 1)));
+  }
+  return Math.max(
+    ...game.agents.map((agent, index) =>
+      data.battles
+        .filter((battle) => battle.winner === `agent${index}`)
+        .reduce((sum, battle) => sum + battle.value, 0)
+    ),
+    0
+  );
+}
+
+function resolveFocusStake(game) {
+  const data = game.roundData;
+  if (!data?.staked || data.stakeResolved) return;
+  const opponentPoints = roundOpponentPoints(game);
+  const bonus = Number(data.playerPoints || 0) > opponentPoints ? 2 : Number(data.playerPoints || 0) < opponentPoints ? -2 : 0;
+  game.playerScore = Number((game.playerScore + bonus).toFixed(1));
+  data.stakeBonus = bonus;
+  data.stakeResolved = true;
+  const last = game.history.at(-1);
+  if (last) {
+    last.playerPoints = Number((Number(last.playerPoints || 0) + bonus).toFixed(1));
+    last.stakeBonus = bonus;
+  }
 }
 
 function stageMarkup(game) {
@@ -4024,6 +4196,8 @@ document.addEventListener("click", (event) => {
       updateGameRoom();
     } else if (action === "submit-bid") submitAuctionBid();
     else if (action === "minority-choice") playMinorityRound(gameActionNode.dataset.choice);
+    else if (action === "focus-scan") useFocusScan();
+    else if (action === "focus-stake") useFocusStake();
     else if (action === "council-vote") castCouncilVote(gameActionNode.dataset.choice);
     else if (action === "wasteland-action") {
       currentGame.roundData.action = gameActionNode.dataset.choice;
@@ -4076,6 +4250,16 @@ document.addEventListener("keydown", (event) => {
   if (event.altKey && event.key.toLowerCase() === "r") {
     event.preventDefault();
     startRandomGame();
+    return;
+  }
+  if (
+    event.key.toLowerCase() === "f" &&
+    !event.altKey &&
+    !["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(event.target.tagName) &&
+    ["choosing", "ai_offer"].includes(currentGame?.status)
+  ) {
+    event.preventDefault();
+    useFocusStake();
     return;
   }
   if (
