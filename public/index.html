@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Paradox Lab: nine bilingual strategy games with local and DeepSeek opponents."
+    />
+    <meta name="theme-color" content="#17372c" />
+    <title>Paradox Lab · 博弈研究所</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-rail" aria-label="主导航">
+        <a class="brand" href="#home" aria-label="返回博弈研究所首页">
+          <span class="brand-mark" aria-hidden="true">
+            <span>P</span>
+            <i></i>
+          </span>
+          <span class="brand-copy">
+            <strong>博弈研究所</strong>
+            <small>PARADOX LAB</small>
+          </span>
+        </a>
+
+        <nav class="primary-nav">
+          <button class="nav-item active" data-route="home" type="button">
+            <span class="nav-icon" data-icon="grid"></span>
+            <span>总览</span>
+          </button>
+          <button class="nav-item" data-route="arena" type="button">
+            <span class="nav-icon" data-icon="swords"></span>
+            <span>博弈场</span>
+          </button>
+          <button class="nav-item" data-route="history" type="button">
+            <span class="nav-icon" data-icon="archive"></span>
+            <span>对局档案</span>
+          </button>
+        </nav>
+
+        <div class="rail-divider"></div>
+
+        <div class="rail-section-label">观察室</div>
+        <button class="rail-note" data-action="open-insights" type="button">
+          <span class="rail-note-symbol" data-icon="spark"></span>
+          <span>
+            <strong>你的决策画像</strong>
+            <small id="rail-profile-hint">完成一局后生成</small>
+          </span>
+          <span class="rail-note-arrow" data-icon="arrow-up-right"></span>
+        </button>
+
+        <div class="rail-spacer"></div>
+
+        <div class="ai-rail-card" id="ai-rail-card">
+          <div class="ai-orbit" aria-hidden="true">
+            <span></span>
+            <i></i>
+          </div>
+          <div class="ai-rail-copy">
+            <span class="eyebrow">INTELLIGENCE</span>
+            <strong id="rail-ai-title">本地策略运行中</strong>
+            <small id="rail-ai-desc">连接 DeepSeek 解锁角色思考</small>
+          </div>
+          <button class="icon-button small" data-action="open-settings" aria-label="AI 设置" type="button">
+            <span data-icon="settings"></span>
+          </button>
+        </div>
+
+        <button class="profile-card" data-action="edit-profile" type="button">
+          <span class="profile-avatar" id="profile-avatar">策</span>
+          <span class="profile-copy">
+            <strong id="profile-name">策略家</strong>
+            <small id="profile-record">尚无对局记录</small>
+          </span>
+          <span class="profile-chevron" data-icon="chevron-right"></span>
+        </button>
+      </aside>
+
+      <div class="mobile-header">
+        <a class="brand" href="#home" aria-label="返回首页">
+          <span class="brand-mark" aria-hidden="true"><span>P</span><i></i></span>
+          <span class="brand-copy">
+            <strong>博弈研究所</strong>
+            <small>PARADOX LAB</small>
+          </span>
+        </a>
+        <div class="mobile-header-actions">
+          <button class="language-toggle" data-action="toggle-language" type="button" aria-label="Switch language">EN</button>
+          <button class="icon-button" data-action="random-game" aria-label="随机开局" type="button">
+            <span data-icon="shuffle"></span>
+          </button>
+          <button class="icon-button" data-action="open-settings" aria-label="AI 设置" type="button">
+            <span data-icon="settings"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-context">
+            <span class="live-dot"></span>
+            <span id="page-context">观察室 · 今日开放</span>
+          </div>
+          <div class="topbar-actions">
+            <span class="date-label" id="today-label"></span>
+            <span class="topbar-separator"></span>
+            <button class="language-toggle" data-action="toggle-language" type="button" aria-label="Switch language">EN</button>
+            <button class="icon-button" data-action="random-game" aria-label="随机开局" type="button">
+              <span data-icon="shuffle"></span>
+            </button>
+            <button class="status-chip" id="ai-status-chip" data-action="open-settings" type="button">
+              <span class="ai-pulse"></span>
+              <span id="ai-status-label">本地策略</span>
+              <span data-icon="chevron-down"></span>
+            </button>
+            <button class="icon-button" data-action="open-settings" aria-label="AI 设置" type="button">
+              <span data-icon="settings"></span>
+            </button>
+          </div>
+        </header>
+
+        <main id="app" class="page-shell" tabindex="-1"></main>
+      </div>
+
+      <nav class="mobile-nav" aria-label="移动端导航">
+        <button class="nav-item active" data-route="home" type="button">
+          <span data-icon="grid"></span><span>总览</span>
+        </button>
+        <button class="nav-item" data-route="arena" type="button">
+          <span data-icon="swords"></span><span>博弈场</span>
+        </button>
+        <button class="nav-item" data-route="history" type="button">
+          <span data-icon="archive"></span><span>档案</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="modal-layer" id="modal-layer" aria-hidden="true">
+      <div class="modal-backdrop" data-action="close-modal"></div>
+      <section class="modal-panel" id="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title"></section>
+    </div>
+
+    <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

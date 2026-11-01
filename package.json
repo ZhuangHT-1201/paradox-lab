@@ -1,0 +1,20 @@
+{
+  "name": "paradox-playground",
+  "version": "2.0.0",
+  "private": true,
+  "description": "A bilingual collection of nine interactive game-theory experiments with local and DeepSeek opponents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZhuangHT-1201/paradox-lab.git"
+  },
+  "homepage": "https://github.com/ZhuangHT-1201/paradox-lab#readme",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
