@@ -1,8 +1,8 @@
-# Paradox Lab
+# IN PLAY · Paradox Lab
 
-**A bilingual collection of nine playable game-theory experiments.**
+**A bilingual game room with nine playable strategy tables.**
 
-Paradox Lab turns cooperation, bargaining, public goods, auctions, hidden factions, resource conflict, coalition formation, and strategic allocation into focused interactive matches. Play entirely offline with adaptive local opponents, or connect a DeepSeek-compatible model for live character decisions.
+IN PLAY turns cooperation, bargaining, public goods, auctions, hidden factions, resource conflict, coalition formation, and strategic allocation into focused matches. Play entirely offline with adaptive local opponents, or connect different model profiles to individual characters.
 
 [Open the app](http://127.0.0.1:4173) · [Report an issue](https://github.com/ZhuangHT-1201/paradox-lab/issues)
 
@@ -17,6 +17,7 @@ Paradox Lab turns cooperation, bargaining, public goods, auctions, hidden factio
 - **Local strategy fallback** for every game when no API key is configured.
 - **Real-time multiplayer-style systems**: hidden factions, simultaneous moves, forced coalition matching, and multi-front resource allocation.
 - **Tactical Focus**: each match gives two Focus tokens. Spend one to scan an opponent tendency or raise the stakes for a +2 / −2 round swing.
+- **Three-table run**: chain three different games into a continuous challenge with a combined match report.
 - **Persistent match archive** and a four-axis decision profile stored locally.
 - **Responsive, dependency-free frontend** with no build step.
 

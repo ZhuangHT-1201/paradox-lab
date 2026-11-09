@@ -142,7 +142,10 @@ const EN_EXACT = {
   "对局档案": "Archive",
   "档案": "Archive",
   "观察室": "OBSERVATORY",
+  "牌谱": "LEDGER",
+  "门厅 · 今日开放": "LOBBY · OPEN",
   "博弈研究所": "PARADOX LAB",
+  "局中": "IN PLAY",
   "你的决策画像": "Decision Profile",
   "完成一局后生成": "Play to unlock",
   "已沉淀": "Recorded",
@@ -929,7 +932,10 @@ export function translateDOM(root = document) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes = [];
   while (walker.nextNode()) {
-    if (!["SCRIPT", "STYLE"].includes(walker.currentNode.parentElement?.tagName)) {
+    if (
+      !["SCRIPT", "STYLE"].includes(walker.currentNode.parentElement?.tagName) &&
+      !walker.currentNode.parentElement?.closest("[data-no-i18n]")
+    ) {
       nodes.push(walker.currentNode);
     }
   }

@@ -576,6 +576,7 @@ let activeFilter = "all";
 let appLanguage = getLanguage();
 let preserveFinishedGame = false;
 let apiProfileDrafts = null;
+let campaign = readCampaign();
 let serverStatus = {
   serverConfigured: false,
   model: "deepseek-chat",
@@ -583,6 +584,20 @@ let serverStatus = {
 };
 let pendingAIRequests = 0;
 let lastAIErrorAt = 0;
+
+function readCampaign() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("paradox-campaign") || "null");
+    return saved && Array.isArray(saved.games) && saved.games.length ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCampaign() {
+  if (campaign) localStorage.setItem("paradox-campaign", JSON.stringify(campaign));
+  else localStorage.removeItem("paradox-campaign");
+}
 
 function saveStore() {
   localStorage.setItem("paradox-lab-store", JSON.stringify(store));
@@ -702,6 +717,41 @@ function navigate(route) {
   else location.hash = route;
 }
 
+function startCampaign() {
+  campaign = {
+    id: `campaign-${Date.now()}`,
+    games: shuffled(GAMES).slice(0, 3).map((game) => game.id),
+    index: 0,
+    results: [],
+    startedAt: new Date().toISOString()
+  };
+  saveCampaign();
+  currentGame = null;
+  navigate(`game/${campaign.games[0]}`);
+}
+
+function continueCampaign() {
+  if (!campaign) return;
+  if (campaign.results.length <= campaign.index) {
+    navigate(`game/${campaign.games[campaign.index]}`);
+    return;
+  }
+  if (campaign.index >= campaign.games.length - 1) {
+    navigate("campaign");
+    return;
+  }
+  campaign.index += 1;
+  saveCampaign();
+  currentGame = null;
+  navigate(`game/${campaign.games[campaign.index]}`);
+}
+
+function exitCampaign() {
+  campaign = null;
+  saveCampaign();
+  navigate("home");
+}
+
 function routeName() {
   return location.hash.replace(/^#\/?/, "") || "home";
 }
@@ -780,41 +830,49 @@ function gameCard(originalGame) {
 
 function renderHome() {
   setRouteActive("home");
-  setContext("观察室 · 今日开放");
+  setContext("门厅 · 今日开放");
   const winRate = store.history.length ? Math.round((totalWins() / store.history.length) * 100) : 0;
 
   const featured = GAMES[new Date().getDate() % GAMES.length];
   $("#app").innerHTML = pageWrap(`
     <section class="home-hero">
       <div class="hero-copy">
-        <span class="kicker">${appLanguage === "en" ? "PLAY THE INCENTIVE · READ THE CHOICE" : "PLAY THE INCENTIVE · 看懂选择"}</span>
-        <h1>${appLanguage === "en" ? 'Read the<br /><em>game</em>.' : "在规则里，<br />读懂<em>选择</em>。"}</h1>
-        <p class="hero-description">${GAMES.length} 种规则，9 个独立博弈场。观察、下注、结盟，然后改写结局。</p>
+        <span class="kicker">${appLanguage === "en" ? "TAKE A SEAT · PLAY YOUR HAND" : "落座 · 开局"}</span>
+        <h1>${appLanguage === "en" ? 'The table is<br /><em>open</em>.' : "牌已发下，<br>轮到你<em>落子</em>。"}</h1>
+        <p class="hero-description">${appLanguage === "en" ? "Nine rule sets. Read the table, choose a side, and live with the result." : "九种规则，九个牌局。看人、下注、结盟，然后落子。"}</p>
         <div class="hero-actions">
-          <button class="button button-primary" data-open-game="${featured.id}" type="button">
-            ${icon("play")} 开始今日博弈
+          <button class="button button-primary" data-action="${campaign ? "continue-campaign" : "start-campaign"}" type="button">
+            ${icon("trophy")} ${campaign ? `${appLanguage === "en" ? "Continue run" : "继续连战"} ${Math.min(campaign.index + 1, 3)}/3` : (appLanguage === "en" ? "Three-game run" : "三局连战")}
           </button>
           <button class="button button-secondary" data-route="arena" type="button">
             浏览全部玩法 ${icon("arrow-right")}
           </button>
+          <button class="button button-quiet" data-open-game="${featured.id}" type="button">
+            ${appLanguage === "en" ? "Featured game" : "今日推荐"} ${icon("arrow-up-right")}
+          </button>
         </div>
       </div>
-      <div class="hero-visual" aria-label="博弈关系示意">
+      <div class="hero-visual table-visual" aria-label="博弈牌桌">
         <div class="hero-visual-head">
-          <span>DECISION FIELD / 01</span>
-          <span class="hero-visual-badge">${aiAvailable() ? "DEEPSEEK READY" : "LOCAL INTEL"}</span>
+          <span>${appLanguage === "en" ? "TONIGHT AT THE TABLE" : "今晚的牌桌"}</span>
+          <span class="hero-visual-badge">${aiAvailable() ? (appLanguage === "en" ? "AGENTS READY" : "牌手就位") : (appLanguage === "en" ? "LOCAL TABLE" : "本地牌局")}</span>
         </div>
-        <div class="decision-orbit" aria-hidden="true">
-          <i class="ring"></i><i class="ring"></i><i class="ring"></i>
-          <span class="orbit-center">?</span>
-          <span class="orbit-node node-a">合</span>
-          <span class="orbit-node node-b">信</span>
-          <span class="orbit-node node-c">衡</span>
-          <span class="orbit-node node-d">争</span>
+        <div class="card-fan" aria-hidden="true">
+          ${[0, 1, 2]
+            .map((offset) => {
+              const game = localizeGame(GAMES[(GAMES.indexOf(featured) + offset) % GAMES.length]);
+              return `<article class="table-card card-${offset + 1}">
+                <small>0${game.index}</small>
+                <span>${game.symbol}</span>
+                <strong>${game.title}</strong>
+                <em>${game.subtitle}</em>
+              </article>`;
+            })
+            .join("")}
         </div>
         <div class="hero-caption">
-          <p>今日推荐</p>
-          <strong>${localizeGame(featured).title}</strong>
+          <p>${appLanguage === "en" ? "Three tables are waiting." : "三张牌，三局未定。"}</p>
+          <strong>${appLanguage === "en" ? "Make your move." : "落子无悔。"}</strong>
         </div>
       </div>
     </section>
@@ -830,7 +888,7 @@ function renderHome() {
       <div class="section-heading">
         <div class="heading-copy">
           <span class="eyebrow">THE GAME COLLECTION</span>
-          <h2>选择你的博弈场</h2>
+          <h2>${appLanguage === "en" ? "Choose a table" : "挑一局"}</h2>
         </div>
         <button class="text-link" data-route="arena" type="button">查看全部 ${icon("arrow-up-right")}</button>
       </div>
@@ -1027,6 +1085,62 @@ function renderHistory() {
             <button class="button button-primary" data-route="arena" type="button">${icon("swords")} 进入博弈场</button>
           </div>`
     }
+  `);
+  hydrateIcons($("#app"));
+}
+
+function renderCampaign() {
+  setRouteActive("campaign");
+  setContext(appLanguage === "en" ? "THREE-GAME RUN · REPORT" : "三局连战 · 战报");
+  const current = campaign;
+  if (!current) {
+    $("#app").innerHTML = pageWrap(`
+      <div class="empty-state">
+        <span class="empty-state-art">三</span>
+        <h3>${appLanguage === "en" ? "No run in progress" : "还没有进行中的连战"}</h3>
+        <p>${appLanguage === "en" ? "Three rule sets. One continuous record." : "三种规则，一条连续战绩。"}</p>
+        <button class="button button-primary" data-action="start-campaign" type="button">${icon("trophy")} ${appLanguage === "en" ? "Draw three games" : "抽取三局"}</button>
+      </div>
+    `);
+    hydrateIcons($("#app"));
+    return;
+  }
+  const wins = current.results.filter((result) => result.outcome === "win").length;
+  const total = current.results.reduce((sum, result) => sum + Number(result.score || 0), 0);
+  $("#app").innerHTML = pageWrap(`
+    <header class="campaign-header">
+      <div class="campaign-title">
+        <span class="kicker">THREE TABLES · ONE RUN</span>
+        <h1>${appLanguage === "en" ? "The Three-Table Run" : "三局连战"}</h1>
+      </div>
+      <div class="campaign-score">
+        <span><small>${appLanguage === "en" ? "Wins" : "胜局"}</small><strong>${wins}</strong></span>
+        <span><small>${appLanguage === "en" ? "Total score" : "总得分"}</small><strong>${formatNumber(total)}</strong></span>
+        <span><small>${appLanguage === "en" ? "Progress" : "进度"}</small><strong>${current.results.length}/3</strong></span>
+      </div>
+    </header>
+    <div class="campaign-ledger">
+      ${current.games
+        .map((gameId, index) => {
+          const game = localizeGame(GAME_BY_ID[gameId]);
+          const result = current.results[index];
+          return `
+            <article class="campaign-leg ${result ? "complete" : index === current.index ? "current" : "pending"}">
+              <span class="campaign-leg-number">0${index + 1}</span>
+              <div class="campaign-leg-main">
+                <small>${game.subtitle}</small>
+                <h2>${game.title}</h2>
+                <p>${result ? `${result.score} : ${result.opponentScore}` : index === current.index ? (appLanguage === "en" ? "In play" : "进行中") : (appLanguage === "en" ? "Waiting" : "等待开局")}</p>
+              </div>
+              <span class="campaign-stamp ${result?.outcome || ""}">${result ? (result.outcome === "win" ? (appLanguage === "en" ? "WIN" : "胜") : result.outcome === "loss" ? (appLanguage === "en" ? "LOSS" : "负") : (appLanguage === "en" ? "DRAW" : "和")) : "—"}</span>
+            </article>`;
+        })
+        .join("")}
+    </div>
+    <div class="campaign-actions">
+      <button class="button button-primary" data-action="${current.results.length < 3 ? "continue-campaign" : "start-campaign"}" type="button">${icon(current.results.length < 3 ? "play" : "refresh")} ${current.results.length < 3 ? (appLanguage === "en" ? "Continue run" : "继续连战") : (appLanguage === "en" ? "Draw a new run" : "重新抽签")}</button>
+      <button class="button button-secondary" data-route="home" type="button">${appLanguage === "en" ? "Back home" : "返回总览"}</button>
+    </div>
   `);
   hydrateIcons($("#app"));
 }
@@ -1298,6 +1412,20 @@ function recordGame(game) {
   store.history.unshift(record);
   store.history = store.history.slice(0, 100);
   saveStore();
+  recordCampaignLeg(record, game);
+}
+
+function recordCampaignLeg(record, game) {
+  if (!campaign || campaign.results.length !== campaign.index) return;
+  if (campaign.games[campaign.index] !== game.gameId) return;
+  campaign.results.push({
+    gameId: game.gameId,
+    score: record.score,
+    opponentScore: record.opponentScore,
+    outcome: record.outcome,
+    playedAt: record.playedAt
+  });
+  saveCampaign();
 }
 
 function buildGameMetrics(game) {
@@ -1421,7 +1549,11 @@ function ensureGame(gameId) {
 function renderGame(gameId) {
   const game = ensureGame(gameId);
   setRouteActive(`game/${gameId}`);
-  setContext(`博弈场 · ${localizeGame(game.meta).title}`);
+  setContext(
+    campaign && campaign.games[campaign.index] === gameId
+      ? `${appLanguage === "en" ? "RUN" : "连战"} ${campaign.index + 1}/3 · ${localizeGame(game.meta).title}`
+      : `博弈场 · ${localizeGame(game.meta).title}`
+  );
   const meta = localizeGame(game.meta);
   $("#app").innerHTML = pageWrap(`
     <div class="game-page">
@@ -4001,9 +4133,15 @@ function resultMarkup(game) {
         </div>
       </div>
       <div class="result-actions">
-        <button class="button button-primary" data-game-action="play-again" type="button">${icon("refresh")} 再来一局</button>
-        <button class="button button-secondary" data-route="arena" type="button">选择其他博弈</button>
-        <button class="button button-quiet" data-route="history" type="button">查看档案 ${icon("arrow-up-right")}</button>
+        ${
+          campaign && campaign.results.length > campaign.index
+            ? `<button class="button button-primary" data-action="continue-campaign" type="button">${icon("trophy")} ${campaign.index >= campaign.games.length - 1 ? (appLanguage === "en" ? "View run report" : "查看连战战报") : (appLanguage === "en" ? `Go to game ${campaign.index + 2}` : `前往第 ${campaign.index + 2} 局`)}</button>
+               <button class="button button-secondary" data-action="exit-campaign" type="button">${appLanguage === "en" ? "Leave run" : "退出连战"}</button>
+               <button class="button button-quiet" data-route="history" type="button">${appLanguage === "en" ? "View archive" : "查看棋谱"} ${icon("arrow-up-right")}</button>`
+            : `<button class="button button-primary" data-game-action="play-again" type="button">${icon("refresh")} 再来一局</button>
+               <button class="button button-secondary" data-route="arena" type="button">选择其他博弈</button>
+               <button class="button button-quiet" data-route="history" type="button">查看档案 ${icon("arrow-up-right")}</button>`
+        }
       </div>
     </div>`;
 }
@@ -4051,6 +4189,7 @@ function renderRoute() {
   if (route === "home" || route === "") renderHome();
   else if (route === "arena") renderArena();
   else if (route === "history") renderHistory();
+  else if (route === "campaign") renderCampaign();
   else if (route.startsWith("game/")) {
     const gameId = route.split("/")[1];
     if (GAME_BY_ID[gameId]) renderGame(gameId);
@@ -4499,6 +4638,9 @@ document.addEventListener("click", (event) => {
   const action = actionNode.dataset.action;
   if (action === "toggle-language") toggleLanguage();
   else if (action === "random-game") startRandomGame();
+  else if (action === "start-campaign") startCampaign();
+  else if (action === "continue-campaign") continueCampaign();
+  else if (action === "exit-campaign") exitCampaign();
   else if (action === "open-settings") settingsModal();
   else if (action === "open-insights") insightsModal();
   else if (action === "edit-profile") profileModal();
